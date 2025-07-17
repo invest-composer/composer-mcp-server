@@ -41,7 +41,7 @@ classifiers = [
 ]
 dependencies = [
     "asyncio>=3.4.3",
-    "fastmcp>=2.8.1",
+    "fastmcp>=2.10.0",
     "httpx>=0.28.1",
     "pydantic>=2.11.7",
 ]
