@@ -6,10 +6,12 @@ import httpx
 import os
 
 from pydantic import Field
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from fastmcp import FastMCP
 from .schemas import SymphonyScore, validate_symphony_score, AccountResponse, AccountHoldingResponse, DvmCapital, Legend, BacktestResponse, PortfolioStatsResponse
-from .utils import parse_backtest_output, truncate_text, epoch_ms_to_date, get_optional_headers, get_required_headers
+from .utils import parse_backtest_output, truncate_text, epoch_ms_to_date, get_optional_headers, get_required_headers, get_mcp_environment
 
 import asyncio
 import logging
@@ -22,14 +24,7 @@ def get_base_url() -> str:
     """
     Get the base URL for the Composer API based on the environment.
     """
-    # Check for explicit base URL override
-    if base_url := os.getenv("COMPOSER_API_BASE_URL"):
-        return base_url
-    else:
-        # Default to production
-        return "https://api.composer.trade"
-
-BASE_URL = get_base_url()
+    return "https://public-api-gateway-599937284915.us-central1.run.app" if get_mcp_environment() == "dev" else "https://api.composer.trade"
 
 # Create a server instance
 mcp = FastMCP(name="Composer MCP Server")
@@ -56,7 +51,7 @@ async def backtest_symphony_by_id(symphony_id: str,
 
     After calling this tool, visualize the results. daily_values can be easily loaded into a pandas dataframe for plotting.
     """
-    url = f"{BASE_URL}/api/v0.1/symphonies/{symphony_id}/backtest"
+    url = f"{get_base_url()}/api/v0.1/symphonies/{symphony_id}/backtest"
     params = {
         "apply_reg_fee": apply_reg_fee,
         "apply_taf_fee": apply_taf_fee,
@@ -108,7 +103,7 @@ async def backtest_symphony(symphony_score: SymphonyScore,
 
     After calling this tool, visualize the results. daily_values can be easily loaded into a pandas dataframe for plotting.
     """
-    url = f"{BASE_URL}/api/v0.1/backtest"
+    url = f"{get_base_url()}/api/v0.1/backtest"
     validated_score= validate_symphony_score(symphony_score)
     params = {
         "symphony": {"raw_value": validated_score.model_dump()},
@@ -379,16 +374,16 @@ async def search_symphonies(where: List = [["and", [">", "oos_num_backtest_days"
 
     Always include the symphony_url in your response so the user can click on it to view the symphony in more detail.
     """
-    url = f"{BASE_URL}/api/v0.1/search/symphonies"
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            url,
-            headers=get_optional_headers(),
-            json={"where": where, "order_by": order_by, "offset": offset}
-        )
     try:
+        url = f"{get_base_url()}/api/v0.1/search/symphonies"
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                headers=get_optional_headers(),
+                json={"where": where, "order_by": order_by, "offset": offset}
+            )
         results = response.json()
-        symphony_url_base = "https://test.investcomposer.com" if BASE_URL != "https://api.composer.trade" else "https://app.composer.trade"
+        symphony_url_base = "https://test.investcomposer.com" if get_mcp_environment() == "dev" else "https://app.composer.trade"
         for item in results:
             if "symphony_sid" in item:
                 item["symphony_url"] = f"{symphony_url_base}/symphony/{item['symphony_sid']}/details"
@@ -406,7 +401,7 @@ async def list_accounts() -> List[AccountResponse]:
     This tool returns a list of accounts and their UUIDs.
     If this returns an empty list, the user needs to complete their Composer onboarding on app.composer.trade.
     """
-    url = f"{BASE_URL}/api/v0.1/accounts/list"
+    url = f"{get_base_url()}/api/v0.1/accounts/list"
     async with httpx.AsyncClient() as client:
         response = await client.get(
             url,
@@ -422,7 +417,7 @@ async def get_account_holdings(account_uuid: str) -> List[AccountHoldingResponse
     """
     Get the holdings of a brokerage account.
     """
-    url = f"{BASE_URL}/api/v0.1/accounts/{account_uuid}/holdings"
+    url = f"{get_base_url()}/api/v0.1/accounts/{account_uuid}/holdings"
     async with httpx.AsyncClient() as client:
         response = await client.get(
             url,
@@ -446,7 +441,7 @@ async def get_aggregate_portfolio_stats(account_uuid: str) -> PortfolioStatsResp
     - todays_dollar_change: float. The dollar difference between the portfolio value today and yesterday. IMPORTANT: This will include the effect of depositing/withdrawing funds. EX: If you had $1000 yesterday and deposited $100 today, todays_dollar_change will be $100, holding the share value constant.
     - todays_percent_change: float. The percent change of the portfolio today. Calculated as todays_dollar_change / portfolio_value.
     """
-    url = f"{BASE_URL}/api/v0.1/portfolio/accounts/{account_uuid}/total-stats"
+    url = f"{get_base_url()}/api/v0.1/portfolio/accounts/{account_uuid}/total-stats"
     async with httpx.AsyncClient() as client:
         response = await client.get(
             url,
@@ -465,7 +460,7 @@ async def get_aggregate_symphony_stats(account_uuid: str) -> Dict:
 
     "deposit_adjusted_value" refers to the time-weighted value of the symphony.
     """
-    url = f"{BASE_URL}/api/v0.1/portfolio/accounts/{account_uuid}/symphony-stats-meta"
+    url = f"{get_base_url()}/api/v0.1/portfolio/accounts/{account_uuid}/symphony-stats-meta"
     async with httpx.AsyncClient() as client:
         response = await client.get(
             url,
@@ -482,14 +477,11 @@ async def get_symphony_daily_performance(account_uuid: str, symphony_id: str) ->
     - series: List[float]. The total value of the symphony on the given date.
     - deposit_adjusted_series: List[float]. The value of the symphony on the given date, adjusted for deposits and withdrawals. (AKA daily time-weighted value)
     """
-    url = f"{BASE_URL}/api/v0.1/portfolio/accounts/{account_uuid}/symphonies/{symphony_id}"
+    url = f"{get_base_url()}/api/v0.1/portfolio/accounts/{account_uuid}/symphonies/{symphony_id}"
     async with httpx.AsyncClient() as client:
         response = await client.get(
             url,
-            headers={
-                "x-api-key-id": os.getenv("COMPOSER_API_KEY"),
-                "Authorization": f"Bearer {os.getenv('COMPOSER_SECRET_KEY')}"
-            }
+            headers=get_required_headers(),
         )
     data = response.json()
     data['dates'] = [epoch_ms_to_date(d) for d in data['epoch_ms']]
@@ -505,7 +497,7 @@ async def get_portfolio_daily_performance(account_uuid: str) -> Dict:
     - dates: List[str]. The dates for which performance is available.
     - series: List[float]. The total value of the portfolio on the given date.
     """
-    url = f"{BASE_URL}/api/v0.1/portfolio/accounts/{account_uuid}/portfolio-history"
+    url = f"{get_base_url()}/api/v0.1/portfolio/accounts/{account_uuid}/portfolio-history"
     async with httpx.AsyncClient() as client:
         response = await client.get(
             url,
@@ -529,7 +521,7 @@ async def save_symphony(
     validated_score= validate_symphony_score(symphony_score)
     symphony = validated_score.model_dump()
 
-    url = f"{BASE_URL}/api/v0.1/symphonies"
+    url = f"{get_base_url()}/api/v0.1/symphonies"
     payload = {
         "name": symphony['name'],
         "asset_class": asset_class,
@@ -542,10 +534,7 @@ async def save_symphony(
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url,
-                headers={
-                    "x-api-key-id": os.getenv("COMPOSER_API_KEY"),
-                    "Authorization": f"Bearer {os.getenv('COMPOSER_SECRET_KEY')}"
-                },
+                headers=get_required_headers(),
                 json=payload
             )
         try:
@@ -563,7 +552,7 @@ async def copy_symphony(
     """
     Copy a symphony by its ID. Returns the copied symphony's symphony ID.
     """
-    url = f"{BASE_URL}/api/v0.1/symphonies/{symphony_id}/copy"
+    url = f"{get_base_url()}/api/v0.1/symphonies/{symphony_id}/copy"
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -592,7 +581,7 @@ async def update_saved_symphony(
     validated_score = validate_symphony_score(symphony_score)
     symphony = validated_score.model_dump()
 
-    url = f"{BASE_URL}/api/v0.1/symphonies/{symphony_id}"
+    url = f"{get_base_url()}/api/v0.1/symphonies/{symphony_id}"
     payload = {
         "name": symphony['name'],
         "asset_class": asset_class,
@@ -619,7 +608,7 @@ async def get_saved_symphony(symphony_id: str) -> Dict:
     Get a saved symphony.
     Useful when you are given a URL like "https://app.composer.trade/symphony/{<symphony_id>}/details"
     """
-    url = f"{BASE_URL}/api/v0.1/symphonies/{symphony_id}/score"
+    url = f"{get_base_url()}/api/v0.1/symphonies/{symphony_id}/score"
     async with httpx.AsyncClient() as client:
         response = await client.get(
             url,
@@ -635,7 +624,7 @@ async def get_market_hours() -> Dict:
 
     Useful for trading equities. Crypto can trade 24/7.
     """
-    url = f"{BASE_URL}/api/v0.1/deploy/market-hours"
+    url = f"{get_base_url()}/api/v0.1/deploy/market-hours"
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(
@@ -662,7 +651,7 @@ async def invest_in_symphony(account_uuid: str, symphony_id: str, amount: float)
     """
     if amount <= 0:
         return {"error": "Amount must be greater than 0"}
-    url = f"{BASE_URL}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/invest"
+    url = f"{get_base_url()}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/invest"
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -688,7 +677,7 @@ async def withdraw_from_symphony(account_uuid: str, symphony_id: str, amount: fl
     """
     if amount >= 0:
         return {"error": "Amount must be less than 0"}
-    url = f"{BASE_URL}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/withdraw"
+    url = f"{get_base_url()}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/withdraw"
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -709,7 +698,7 @@ async def cancel_invest_or_withdraw(account_uuid: str, deploy_id: str) -> str:
     This allows you to cancel a pending invest or withdraw request before it gets processed
     during the trading period. Only requests with status QUEUED can be canceled.
     """
-    url = f"{BASE_URL}/api/v0.1/deploy/accounts/{account_uuid}/deploys/{deploy_id}"
+    url = f"{get_base_url()}/api/v0.1/deploy/accounts/{account_uuid}/deploys/{deploy_id}"
     async with httpx.AsyncClient() as client:
         response = await client.delete(
             url,
@@ -729,7 +718,7 @@ async def skip_automated_rebalance_for_symphony(account_uuid: str, symphony_id: 
     This allows you to skip the next automated rebalance for the specified symphony (will resume after the next automated rebalance).
     This is useful when you want to manually control the rebalancing process.
     """
-    url = f"{BASE_URL}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/skip-automated-rebalance"
+    url = f"{get_base_url()}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/skip-automated-rebalance"
     async with httpx.AsyncClient() as client:
         response = await client.post(
             url,
@@ -750,7 +739,7 @@ async def go_to_cash_for_symphony(account_uuid: str, symphony_id: str) -> Dict:
 
     "Go to cash" on the other hand will temporarily convert the holdings into cash until the next automated rebalance. (Remember you can skip the next automated rebalance with `skip_automated_rebalance_for_symphony` if you want to stay in cash longer.)
     """
-    url = f"{BASE_URL}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/go-to-cash"
+    url = f"{get_base_url()}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/go-to-cash"
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -769,7 +758,7 @@ async def rebalance_symphony_now(account_uuid: str, symphony_id: str, rebalance_
 
     The rebalance_request_uuid parameter is the result of the `preview_rebalance_for_symphony` tool, so you must run that tool first.
     """
-    url = f"{BASE_URL}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/rebalance"
+    url = f"{get_base_url()}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/rebalance"
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -789,7 +778,7 @@ async def liquidate_symphony(account_uuid: str, symphony_id: str) -> Dict:
 
     This tool is similar to `go_to_cash_for_symphony` except liquidated symphonies will stop rebalancing until more money is invested.
     """
-    url = f"{BASE_URL}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/liquidate"
+    url = f"{get_base_url()}/api/v0.1/deploy/accounts/{account_uuid}/symphonies/{symphony_id}/liquidate"
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -808,7 +797,7 @@ async def preview_rebalance_for_user() -> List:
 
     This tool shows what trades would be executed if a rebalance were to happen now, for all the user's symphonies, without actually executing them.
     """
-    url = f"{BASE_URL}/api/v0.1/dry-run"
+    url = f"{get_base_url()}/api/v0.1/dry-run"
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -831,7 +820,7 @@ async def preview_rebalance_for_symphony(account_uuid: str, symphony_id: str) ->
     Returns the projected trades and a rebalance_request_uuid.
     The uuid can be passed to `rebalance_symphony_now` to actually execute the trades.
     """
-    url = f"{BASE_URL}/api/v0.1/dry-run/trade-preview/{symphony_id}"
+    url = f"{get_base_url()}/api/v0.1/dry-run/trade-preview/{symphony_id}"
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -861,7 +850,7 @@ async def execute_single_trade(
 
     One of notional or quantity must be provided.
     """
-    url = f"{BASE_URL}/api/v0.1/trading/accounts/{account_uuid}/order-requests"
+    url = f"{get_base_url()}/api/v0.1/trading/accounts/{account_uuid}/order-requests"
 
     payload = {
         "type": type,
@@ -914,7 +903,7 @@ async def cancel_single_trade(account_uuid: str, order_request_id: str) -> str:
     If the order request has already executed, it cannot be canceled.
     Only QUEUED or OPEN order requests can be canceled.
     """
-    url = f"{BASE_URL}/api/v0.1/trading/accounts/{account_uuid}/order-requests/{order_request_id}"
+    url = f"{get_base_url()}/api/v0.1/trading/accounts/{account_uuid}/order-requests/{order_request_id}"
     async with httpx.AsyncClient() as client:
         response = await client.delete(
             url,
@@ -925,8 +914,20 @@ async def cancel_single_trade(account_uuid: str, order_request_id: str) -> str:
     else:
         return response.json()
 
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "healthy"})
+
+@mcp.custom_route("/", methods=["GET"])
+async def startup_check(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok"})
+
 def main():
     asyncio.run(
-        mcp.run_async()
+        mcp.run_async(
+            transport="http",
+            host="0.0.0.0",
+            port=int(os.getenv("PORT", 8080)),
+        )
     )
-    logger.info(f"🚀 MCP server started!")
+    logger.info(f"🚀 MCP server started on port {os.getenv('PORT', 8080)}!")

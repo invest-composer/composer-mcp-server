@@ -1,0 +1,15 @@
+permissions: write-all
+
+on:
+  workflow_dispatch:  # Manual trigger
+  push:
+    branches:
+      - gcloud  # TODO: remove this once we have a main branch
+      - main
+
+jobs:
+  deploy:
+    name: Deploy Composer Trade MCP
+    uses: ./.github/workflows/deploy.yml
+    with:
+      service_name: composer-trade-mcp

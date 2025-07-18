@@ -1,25 +1,30 @@
 """
 Authentication utilities for Composer MCP Server.
 """
-import os
+
+from fastmcp.server.dependencies import get_http_headers
 from typing import Dict
 
+def get_mcp_environment() -> str:
+    """
+    Get the environment of the MCP server.
+    """
+    headers = get_http_headers()
+    return headers.get("x-composer-mcp-environment", "prod")
 
 def get_optional_headers() -> Dict[str, str]:
     """
     Get headers for optional authentication (read-only operations).
     Always includes x-origin. Only includes API key and secret if both are present.
     """
-    headers = {"x-origin": "public-api"}
-    api_key = os.getenv("COMPOSER_API_KEY")
-    secret_key = os.getenv("COMPOSER_SECRET_KEY")
-
-    # Only include both keys if both are present
+    headers = get_http_headers()
+    headers["x-origin"] = "public-api"
+    api_key = headers.get("x-api-key-id")
+    secret_key = headers.get("authorization")
     if api_key and secret_key:
-        headers["x-api-key-id"] = api_key
-        headers["Authorization"] = f"Bearer {secret_key}"
-
-    return headers
+        return headers
+    else:
+        return {"x-origin": "public-api"}
 
 
 def get_required_headers() -> Dict[str, str]:
@@ -27,17 +32,14 @@ def get_required_headers() -> Dict[str, str]:
     Get headers for required authentication (write operations).
     Requires both API key and secret key to be present.
     """
-    api_key = os.getenv("COMPOSER_API_KEY")
-    secret_key = os.getenv("COMPOSER_SECRET_KEY")
+    headers = get_http_headers()
+    headers["x-origin"] = "public-api"
+    api_key = headers.get("x-api-key-id")
+    secret_key = headers.get("authorization")
 
     if not api_key:
-        raise ValueError("COMPOSER_API_KEY environment variable is required but not set")
+        raise ValueError("X-Api-Key-Id header is required but not set")
     if not secret_key:
-        raise ValueError("COMPOSER_SECRET_KEY environment variable is required but not set")
+        raise ValueError("Authorization header is required but not set")
 
-    headers = {
-        "x-origin": "public-api",
-        "x-api-key-id": api_key,
-        "Authorization": f"Bearer {secret_key}"
-    }
     return headers

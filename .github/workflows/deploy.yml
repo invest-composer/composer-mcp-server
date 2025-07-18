@@ -1,0 +1,81 @@
+name: Composer Trade MCP Cloud Run Deploy
+
+on:
+  workflow_call:
+    inputs:
+      version_name:
+        description: Version Name
+        required: false
+        type: string
+        default: ${{ github.sha }}-${{ github.run_number }}
+      gcp_region:
+        description: GCP Region
+        required: false
+        type: string
+        default: us-central1
+      gcp_project_name:
+        description: GCP Project Name
+        required: false
+        type: string
+        default: leverheads
+      gcp_project_id:
+        description: GCP Project ID
+        required: false
+        type: string
+        default: 599937284915
+      service_name:
+        description: Cloud Run Service Name
+        required: true
+        type: string
+env:
+  IMAGE_NAME: ${{ inputs.gcp_region }}-docker.pkg.dev/${{ inputs.gcp_project_name }}/cloud-run/${{ inputs.service_name }}:${{ github.sha }}
+  APP_SERVICE_ACCOUNT: "${{ inputs.service_name }}@${{ inputs.gcp_project_name }}.iam.gserviceaccount.com"
+  DEPLOY_SERVICE_ACCOUNT: "deploy-admin@${{ inputs.gcp_project_name }}.iam.gserviceaccount.com"
+  REGION: ${{ inputs.gcp_region }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - id: auth
+        name: Authenticate with GCloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ inputs.gcp_project_id }}"
+          workload_identity_provider: projects/${{ inputs.gcp_project_id }}/locations/global/workloadIdentityPools/github/providers/github-actions
+          service_account: deploy-admin@${{ inputs.gcp_project_name }}.iam.gserviceaccount.com
+
+      - id: docker-auth
+        name: Configure Docker Auth
+        run: gcloud auth configure-docker ${{ inputs.gcp_region }}-docker.pkg.dev
+
+      - id: setup-gcloud
+        name: Setup GCloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push container
+        run: |
+          docker build -f DOCKERFILE -t ${{ env.IMAGE_NAME }} .
+          docker push ${{ env.IMAGE_NAME }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud --project ${{ inputs.gcp_project_name }} \
+            run deploy ${{ inputs.service_name }} \
+            --revision-suffix ${{ inputs.version_name }} \
+            --service-account "${{ env.APP_SERVICE_ACCOUNT }}" \
+            --image ${{ env.IMAGE_NAME }} \
+            --region ${{ env.REGION }} \
+            --allow-unauthenticated \
+            --min-instances 1 \
+            --max-instances 1 \
+            --memory 512Mi \
+            --cpu 1
