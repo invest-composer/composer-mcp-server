@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/invest-composer-composer-trade-mcp-badge.png)](https://mseep.ai/app/invest-composer-composer-trade-mcp)
+
 ![composermcpheader](https://github.com/user-attachments/assets/786b71f3-78a3-48f3-a4ee-f42f85a52949)
 
 <div class="title-block" style="text-align: center;" align="center">
